@@ -1348,7 +1348,6 @@ static void nf_conntrack_cleanup_init_net(void)
 	while (untrack_refs() > 0)
 		schedule();
 
-	nf_conntrack_proto_fini();
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	nf_ct_extend_unregister(&nf_ct_zone_extend);
 #endif
@@ -1387,7 +1386,7 @@ void nf_conntrack_cleanup(struct net *net)
 	   netfilter framework.  Roll on, two-stage module
 	   delete... */
 	synchronize_net();
-
+	nf_conntrack_proto_fini(net);
 	nf_conntrack_cleanup_net(net);
 
 	if (net_eq(net, &init_net)) {
@@ -1511,11 +1510,6 @@ static int nf_conntrack_init_init_net(void)
 	printk(KERN_INFO "nf_conntrack version %s (%u buckets, %d max)\n",
 	       NF_CONNTRACK_VERSION, nf_conntrack_htable_size,
 	       nf_conntrack_max);
-
-	ret = nf_conntrack_proto_init();
-	if (ret < 0)
-		goto err_proto;
-
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	ret = nf_ct_extend_register(&nf_ct_zone_extend);
 	if (ret < 0)
@@ -1533,9 +1527,7 @@ static int nf_conntrack_init_init_net(void)
 
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 err_extend:
-	nf_conntrack_proto_fini();
 #endif
-err_proto:
 	return ret;
 }
 
@@ -1598,9 +1590,7 @@ static int nf_conntrack_init_net(struct net *net)
 	ret = nf_conntrack_helper_init(net);
 	if (ret < 0)
 		goto err_helper;
-
 	return 0;
-
 err_helper:
 	nf_conntrack_timeout_fini(net);
 err_timeout:
@@ -1637,6 +1627,9 @@ int nf_conntrack_init(struct net *net)
 		if (ret < 0)
 			goto out_init_net;
 	}
+	ret = nf_conntrack_proto_init(net);
+	if (ret < 0)
+		goto out_proto;
 	ret = nf_conntrack_init_net(net);
 	if (ret < 0)
 		goto out_net;
@@ -1652,6 +1645,8 @@ int nf_conntrack_init(struct net *net)
 	return 0;
 
 out_net:
+	nf_conntrack_proto_fini(net);
+out_proto:
 	if (net_eq(net, &init_net))
 		nf_conntrack_cleanup_init_net();
 out_init_net:
