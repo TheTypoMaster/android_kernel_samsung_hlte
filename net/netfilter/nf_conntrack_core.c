@@ -1366,6 +1366,7 @@ void nf_conntrack_cleanup_end(void)
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	nf_ct_extend_unregister(&nf_ct_zone_extend);
 #endif
+	nf_conntrack_expect_fini();
 }
 
 /*
@@ -1396,7 +1397,7 @@ void nf_conntrack_cleanup_net(struct net *net)
 	nf_conntrack_ecache_fini(net);
 	nf_conntrack_tstamp_fini(net);
 	nf_conntrack_acct_fini(net);
-	nf_conntrack_expect_fini(net);
+	nf_conntrack_expect_pernet_fini(net);
 	kmem_cache_destroy(net->ct.nf_conntrack_cachep);
 	kfree(net->ct.slabname);
 	free_percpu(net->ct.stat);
@@ -1537,6 +1538,11 @@ int nf_conntrack_init_start(void)
 	printk(KERN_INFO "nf_conntrack version %s (%u buckets, %d max)\n",
 	       NF_CONNTRACK_VERSION, nf_conntrack_htable_size,
 	       nf_conntrack_max);
+
+	ret = nf_conntrack_expect_init();
+	if (ret < 0)
+		goto err_expect;
+
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	ret = nf_ct_extend_register(&nf_ct_zone_extend);
 	if (ret < 0)
@@ -1554,7 +1560,9 @@ int nf_conntrack_init_start(void)
 
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 err_extend:
+	nf_conntrack_expect_fini();
 #endif
+err_expect:
 	return ret;
 }
 
@@ -1611,7 +1619,7 @@ int nf_conntrack_init_net(struct net *net)
 		printk(KERN_ERR "Unable to create nf_conntrack_hash\n");
 		goto err_hash;
 	}
-	ret = nf_conntrack_expect_init(net);
+	ret = nf_conntrack_expect_pernet_init(net);
 	if (ret < 0)
 		goto err_expect;
 	ret = nf_conntrack_acct_init(net);
@@ -1652,7 +1660,7 @@ err_ecache:
 err_tstamp:
 	nf_conntrack_acct_fini(net);
 err_acct:
-	nf_conntrack_expect_fini(net);
+	nf_conntrack_expect_pernet_fini(net);
 err_expect:
 	nf_ct_free_hashtable(net->ct.hash, net->ct.htable_size);
 err_hash:
