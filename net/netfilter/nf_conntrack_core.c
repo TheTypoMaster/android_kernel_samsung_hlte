@@ -1366,6 +1366,7 @@ void nf_conntrack_cleanup_end(void)
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	nf_ct_extend_unregister(&nf_ct_zone_extend);
 #endif
+	nf_conntrack_tstamp_fini();
 	nf_conntrack_acct_fini();
 	nf_conntrack_expect_fini();
 }
@@ -1396,7 +1397,7 @@ void nf_conntrack_cleanup_net(struct net *net)
 	nf_conntrack_helper_fini(net);
 	nf_conntrack_timeout_fini(net);
 	nf_conntrack_ecache_fini(net);
-	nf_conntrack_tstamp_fini(net);
+	nf_conntrack_tstamp_pernet_fini(net);
 	nf_conntrack_acct_pernet_fini(net);
 	nf_conntrack_expect_pernet_fini(net);
 	kmem_cache_destroy(net->ct.nf_conntrack_cachep);
@@ -1548,6 +1549,10 @@ int nf_conntrack_init_start(void)
 	if (ret < 0)
 		goto err_acct;
 
+	ret = nf_conntrack_tstamp_init();
+	if (ret < 0)
+		goto err_tstamp;
+
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	ret = nf_ct_extend_register(&nf_ct_zone_extend);
 	if (ret < 0)
@@ -1565,8 +1570,10 @@ int nf_conntrack_init_start(void)
 
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 err_extend:
-	nf_conntrack_acct_fini();
+	nf_conntrack_tstamp_fini();
 #endif
+err_tstamp:
+	nf_conntrack_acct_fini();
 err_acct:
 	nf_conntrack_expect_fini();
 err_expect:
@@ -1632,7 +1639,7 @@ int nf_conntrack_init_net(struct net *net)
 	ret = nf_conntrack_acct_pernet_init(net);
 	if (ret < 0)
 		goto err_acct;
-	ret = nf_conntrack_tstamp_init(net);
+	ret = nf_conntrack_tstamp_pernet_init(net);
 	if (ret < 0)
 		goto err_tstamp;
 	ret = nf_conntrack_ecache_init(net);
@@ -1663,7 +1670,7 @@ err_helper:
 err_timeout:
 	nf_conntrack_ecache_fini(net);
 err_ecache:
-	nf_conntrack_tstamp_fini(net);
+	nf_conntrack_tstamp_pernet_fini(net);
 err_tstamp:
 	nf_conntrack_acct_pernet_fini(net);
 err_acct:
