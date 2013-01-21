@@ -47,9 +47,9 @@ bool nf_connlabel_match(const struct nf_conn *ct, u16 bit);
 int nf_connlabel_set(struct nf_conn *ct, u16 bit);
 
 #ifdef CONFIG_NF_CONNTRACK_LABELS
-int nf_conntrack_labels_init(struct net *net);
-void nf_conntrack_labels_fini(struct net *net);
+int nf_conntrack_labels_init(void);
+void nf_conntrack_labels_fini(void);
 #else
-static inline int nf_conntrack_labels_init(struct net *n) { return 0; }
-static inline void nf_conntrack_labels_fini(struct net *net) {}
+static inline int nf_conntrack_labels_init(void) { return 0; }
+static inline void nf_conntrack_labels_fini(void) {}
 #endif
