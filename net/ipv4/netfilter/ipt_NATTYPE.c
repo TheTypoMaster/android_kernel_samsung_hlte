@@ -60,6 +60,7 @@ struct ipt_nattype {
 	struct timer_list timeout;
 	unsigned long timeout_value;
 	unsigned int nattype_cookie;
+	unsigned char is_valid;
 	unsigned short proto;		/* Protocol: TCP or UDP */
 	struct nf_nat_ipv4_range range;	/* LAN side source information */
 	unsigned short nat_port;	/* Routed NAT port */
@@ -106,12 +107,14 @@ static void nattype_free(struct ipt_nattype *nte)
  *	Refresh the timer for this object.
  */
 bool nattype_refresh_timer(unsigned long nat_type, unsigned long timeout_value)
+bool nattype_refresh_timer(unsigned long nat_type)
 {
 	struct ipt_nattype *nte = (struct ipt_nattype *)nat_type;
 	if (!nte)
 		return false;
 	spin_lock_bh(&nattype_lock);
 	if (nte->nattype_cookie != NATTYPE_COOKIE) {
+	if (!nte->is_valid) {
 		spin_unlock_bh(&nattype_lock);
 		return false;
 	}
@@ -388,6 +391,7 @@ static unsigned int nattype_forward(struct sk_buff *skb,
 			 */
 			if (!nattype_refresh_timer((unsigned long)nte,
 					ct->timeout.expires))
+			if (!nattype_refresh_timer((unsigned long)nte))
 				break;
 			/*
 			 * The entry is found and refreshed, the
@@ -465,6 +469,7 @@ static unsigned int nattype_forward(struct sk_buff *skb,
 		nte2->timeout_value = ct->timeout.expires - jiffies;
 		if (!nattype_refresh_timer((unsigned long)nte2,
 				ct->timeout.expires))
+		if (!nattype_refresh_timer((unsigned long)nte2))
 			break;
 		/*
 		 * Found and refreshed an existing entry.  Its values
@@ -486,6 +491,7 @@ static unsigned int nattype_forward(struct sk_buff *skb,
 	list_add(&nte->list, &nattype_list);
 	ct->nattype_entry = (unsigned long)nte;
 	nte->nattype_cookie = NATTYPE_COOKIE;
+	nte->is_valid = 1;
 	spin_unlock_bh(&nattype_lock);
 	nattype_nte_debug_print(nte, "ADD");
 	return XT_CONTINUE;
