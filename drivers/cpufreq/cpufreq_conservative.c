@@ -133,6 +133,26 @@ static void cs_dbs_timer(struct work_struct *work)
 	unsigned int cpu = dbs_info->cdbs.cpu;
 	int delay = delay_for_sampling_rate(cs_tuners.sampling_rate);
 
+	unsigned int cpu = dbs_info->cdbs.cur_policy->cpu;
+	int delay = delay_for_sampling_rate(cs_tuners.sampling_rate);
+
+	if (sample)
+		dbs_check_cpu(&cs_dbs_data, cpu);
+
+	schedule_delayed_work_on(smp_processor_id(), dw, delay);
+}
+
+static void cs_timer_coordinated(struct cs_cpu_dbs_info_s *dbs_info_local,
+				 struct delayed_work *dw)
+{
+	struct cs_cpu_dbs_info_s *dbs_info;
+	ktime_t time_now;
+	s64 delta_us;
+	bool sample = true;
+
+	/* use leader CPU's dbs_info */
+	dbs_info = &per_cpu(cs_cpu_dbs_info,
+			    dbs_info_local->cdbs.cur_policy->cpu);
 	mutex_lock(&dbs_info->cdbs.timer_mutex);
 
 	dbs_check_cpu(&cs_dbs_data, cpu);
