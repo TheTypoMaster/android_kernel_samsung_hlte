@@ -157,6 +157,9 @@ static unsigned int ipv6_helper(unsigned int hooknum,
 	unsigned int extoff = (u8 *)(ipv6_hdr(skb) + 1) - skb->data;
 	unsigned char pnum = ipv6_hdr(skb)->nexthdr;
 
+	__be16 frag_off;
+	int protoff;
+	u8 nexthdr;
 
 	/* This is where we call the helper: as the packet goes out. */
 	ct = nf_ct_get(skb, &ctinfo);
@@ -178,12 +181,7 @@ static unsigned int ipv6_helper(unsigned int hooknum,
 		return NF_ACCEPT;
 	}
 
-	ret = helper->help(skb, protoff, ct, ctinfo);
-	if (ret != NF_ACCEPT && (ret & NF_VERDICT_MASK) != NF_QUEUE) {
-		nf_log_packet(NFPROTO_IPV6, hooknum, skb, in, out, NULL,
-			      "nf_ct_%s: dropping packet", helper->name);
-	}
-	return ret;
+	return helper->help(skb, protoff, ct, ctinfo);
 }
 
 static unsigned int ipv6_confirm(unsigned int hooknum,
