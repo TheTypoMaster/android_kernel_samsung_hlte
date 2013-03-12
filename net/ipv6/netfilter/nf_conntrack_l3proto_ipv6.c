@@ -290,6 +290,52 @@ static struct nf_hook_ops ipv6_conntrack_ops[] __read_mostly = {
 };
 
 #if defined(CONFIG_NF_CT_NETLINK) || defined(CONFIG_NF_CT_NETLINK_MODULE)
+static int
+ipv6_getorigdst(struct sock *sk, int optval, void __user *user, int *len)
+{
+	const struct inet_sock *inet = inet_sk(sk);
+	const struct ipv6_pinfo *inet6 = inet6_sk(sk);
+	const struct nf_conntrack_tuple_hash *h;
+	struct sockaddr_in6 sin6;
+	struct nf_conntrack_tuple tuple = { .src.l3num = NFPROTO_IPV6 };
+	struct nf_conn *ct;
+
+	tuple.src.u3.in6 = inet6->rcv_saddr;
+	tuple.src.u.tcp.port = inet->inet_sport;
+	tuple.dst.u3.in6 = inet6->daddr;
+	tuple.dst.u.tcp.port = inet->inet_dport;
+	tuple.dst.protonum = sk->sk_protocol;
+
+	if (sk->sk_protocol != IPPROTO_TCP && sk->sk_protocol != IPPROTO_SCTP)
+		return -ENOPROTOOPT;
+
+	if (*len < 0 || (unsigned int) *len < sizeof(sin6))
+		return -EINVAL;
+
+	h = nf_conntrack_find_get(sock_net(sk), NF_CT_DEFAULT_ZONE, &tuple);
+	if (!h) {
+		pr_debug("IP6T_SO_ORIGINAL_DST: Can't find %pI6c/%u-%pI6c/%u.\n",
+			 &tuple.src.u3.ip6, ntohs(tuple.src.u.tcp.port),
+			 &tuple.dst.u3.ip6, ntohs(tuple.dst.u.tcp.port));
+		return -ENOENT;
+	}
+
+	ct = nf_ct_tuplehash_to_ctrack(h);
+
+	sin6.sin6_family = AF_INET6;
+	sin6.sin6_port = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.tcp.port;
+	sin6.sin6_flowinfo = inet6->flow_label & IPV6_FLOWINFO_MASK;
+	memcpy(&sin6.sin6_addr,
+		&ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.in6,
+					sizeof(sin6.sin6_addr));
+
+	nf_ct_put(ct);
+	sin6.sin6_scope_id = ipv6_iface_scope_id(&sin6.sin6_addr,
+						 sk->sk_bound_dev_if);
+	return copy_to_user(user, &sin6, sizeof(sin6)) ? -EFAULT : 0;
+}
+
+#if IS_ENABLED(CONFIG_NF_CT_NETLINK)
 
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter/nfnetlink_conntrack.h>
