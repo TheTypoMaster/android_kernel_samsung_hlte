@@ -264,6 +264,9 @@ static void death_by_event(unsigned long ul_conntrack)
 		ct->timeout.expires = jiffies +
 			(random32() % net->ct.sysctl_events_retry_timeout);
 		add_timer(&ct->timeout);
+		ecache->timeout.expires = jiffies +
+			(prandom_u32() % net->ct.sysctl_events_retry_timeout);
+		add_timer(&ecache->timeout);
 		return;
 	}
 	/* we've got the event delivered, now it's dying */
@@ -288,6 +291,10 @@ void nf_ct_insert_dying_list(struct nf_conn *ct)
 	ct->timeout.expires = jiffies +
 		(random32() % net->ct.sysctl_events_retry_timeout);
 	add_timer(&ct->timeout);
+	setup_timer(&ecache->timeout, death_by_event, (unsigned long)ct);
+	ecache->timeout.expires = jiffies +
+		(prandom_u32() % net->ct.sysctl_events_retry_timeout);
+	add_timer(&ecache->timeout);
 }
 EXPORT_SYMBOL_GPL(nf_ct_insert_dying_list);
 
