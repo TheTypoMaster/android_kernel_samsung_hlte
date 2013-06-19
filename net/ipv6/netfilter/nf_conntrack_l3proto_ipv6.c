@@ -211,6 +211,25 @@ static unsigned int __ipv6_conntrack_in(struct net *net,
 			if (ret != NF_ACCEPT)
 				return ret;
 		}
+
+		/* Conntrack helpers need the entire reassembled packet in the
+		 * POST_ROUTING hook. In case of unconfirmed connections NAT
+		 * might reassign a helper, so the entire packet is also
+		 * required.
+		 */
+		ct = nf_ct_get(reasm, &ctinfo);
+		if (ct != NULL && !nf_ct_is_untracked(ct)) {
+			help = nfct_help(ct);
+			if ((help && help->helper) || !nf_ct_is_confirmed(ct)) {
+				nf_conntrack_get_reasm(reasm);
+				NF_HOOK_THRESH(NFPROTO_IPV6, hooknum, reasm,
+					       (struct net_device *)in,
+					       (struct net_device *)out,
+					       okfn, NF_IP6_PRI_CONNTRACK + 1);
+				return NF_DROP_ERR(-ECANCELED);
+			}
+		}
+
 		nf_conntrack_get(reasm->nfct);
 		skb->nfct = reasm->nfct;
 		skb->nfctinfo = reasm->nfctinfo;
