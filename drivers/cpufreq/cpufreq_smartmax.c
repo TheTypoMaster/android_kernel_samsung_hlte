@@ -278,7 +278,19 @@ inline static void smartmax_update_min_max_allcpus(void) {
 	{
 		struct smartmax_info_s *this_smartmax = &per_cpu(smartmax_info, i);
 		if (this_smartmax->enable)
+	unsigned int cpu;
+
+	for_each_online_cpu(cpu)
+	{
+		struct smartmax_info_s *this_smartmax = &per_cpu(smartmax_info, cpu);
+		if (this_smartmax->cur_policy){
+			if (lock_policy_rwsem_write(cpu) < 0)
+				continue;
+
 			smartmax_update_min_max(this_smartmax, this_smartmax->cur_policy);
+			
+			unlock_policy_rwsem_write(cpu);
+		}
 	}
 }
 
@@ -1004,6 +1016,45 @@ static int cpufreq_smartmax_boost_task(void *data) {
 
 		if (lock_policy_rwsem_write(0) < 0)
 			continue;
+        if (lock_policy_rwsem_write(0) < 0)
+        	continue;
+		
+		tegra_input_boost(policy, cur_boost_freq, CPUFREQ_RELATION_H);
+	
+        this_smartmax->prev_cpu_idle = get_cpu_idle_time(0,
+						&this_smartmax->prev_cpu_wall);
+
+        unlock_policy_rwsem_write(0);
+#else		
+		for_each_online_cpu(cpu){
+			this_smartmax = &per_cpu(smartmax_info, cpu);
+			if (!this_smartmax)
+				continue;
+
+			if (lock_policy_rwsem_write(cpu) < 0)
+				continue;
+
+			policy = this_smartmax->cur_policy;
+			if (!policy){
+				unlock_policy_rwsem_write(cpu);
+				continue;
+			}
+
+			mutex_lock(&this_smartmax->timer_mutex);
+
+			if (policy->cur < cur_boost_freq) {
+				start_boost = true;
+#if SMARTMAX_DEBUG
+				dprintk(SMARTMAX_DEBUG_BOOST, "input boost cpu %d to %d\n", cpu, cur_boost_freq);
+#endif
+				target_freq(policy, this_smartmax, cur_boost_freq, this_smartmax->old_freq, CPUFREQ_RELATION_H);
+				this_smartmax->prev_cpu_idle = get_cpu_idle_time(cpu, &this_smartmax->prev_cpu_wall);
+			}
+			mutex_unlock(&this_smartmax->timer_mutex);
+
+			unlock_policy_rwsem_write(cpu);
+		}
+#endif
 
 		mutex_lock(&this_smartmax->timer_mutex);
 
@@ -1024,6 +1075,29 @@ static int cpufreq_smartmax_boost_task(void *data) {
 
 	return 0;
 }
+
+#ifdef CONFIG_INPUT_MEDIATOR
+
+static void smartmax_input_event(struct input_handle *handle, unsigned int type,
+		unsigned int code, int value) {
+	if (touch_poke && type == EV_SYN && code == SYN_REPORT) {
+		// no need to bother if currently a boost is running anyway
+		if (boost_task_alive && boost_running)
+			return;
+
+		if (boost_task_alive) {
+			cur_boost_freq = touch_poke_freq;
+			cur_boost_duration = input_boost_duration;
+			wake_up_process(boost_task);
+		}
+	}
+}
+
+static struct input_mediator_handler smartmax_input_mediator_handler = {
+	.event = smartmax_input_event,
+	};
+
+#else
 
 static void dbs_input_event(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value) {
@@ -1096,6 +1170,14 @@ static const struct input_device_id dbs_ids[] = { { .driver_info = 1 }, { }, };
 static struct input_handler dbs_input_handler = { .event = dbs_input_event,
 		.connect = dbs_input_connect, .disconnect = dbs_input_disconnect,
 		.name = "cpufreq_smartmax", .id_table = dbs_ids, };
+static struct input_handler dbs_input_handler = { 
+	.event = dbs_input_event,
+	.connect = dbs_input_connect, 
+	.disconnect = dbs_input_disconnect,
+	.name = "cpufreq_smartmax", 
+	.id_table = dbs_ids, 
+	};
+#endif
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void smartmax_early_suspend(struct early_suspend *h)
@@ -1160,12 +1242,16 @@ static int cpufreq_governor_smartmax(struct cpufreq_policy *new_policy,
 				get_task_struct(boost_task);
 				boost_task_alive = true;
 			}
+#ifdef CONFIG_INPUT_MEDIATOR
+			input_register_mediator_secondary(&smartmax_input_mediator_handler);
+#else
 			rc = input_register_handler(&dbs_input_handler);
 			if (rc) {
 				dbs_enable--;
 				mutex_unlock(&dbs_mutex);
 				return rc;
 			}
+#endif
 			rc = sysfs_create_group(cpufreq_global_kobject,
 					&smartmax_attr_group);
 			if (rc) {
@@ -1216,7 +1302,11 @@ static int cpufreq_governor_smartmax(struct cpufreq_policy *new_policy,
 
 		if (!dbs_enable){
 			sysfs_remove_group(cpufreq_global_kobject, &smartmax_attr_group);
+#ifdef CONFIG_INPUT_MEDIATOR
+			input_unregister_mediator_secondary(&smartmax_input_mediator_handler);
+#else
 			input_unregister_handler(&dbs_input_handler);
+#endif
 #ifdef CONFIG_HAS_EARLYSUSPEND
 			unregister_early_suspend(&smartmax_early_suspend_handler);
 #endif
