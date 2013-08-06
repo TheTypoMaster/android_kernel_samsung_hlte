@@ -12,7 +12,10 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/cpufreq.h>
+#include <linux/module.h>
 
 /*********************************************************************
  *                     FREQUENCY TABLE HELPERS                       *
