@@ -1105,15 +1105,28 @@ static void dbs_input_event(struct input_handle *handle, unsigned int type,
 {
 	int i;
 
-	if ((dbs_tuners_ins.powersave_bias == POWERSAVE_BIAS_MAXLEVEL) ||
-		(dbs_tuners_ins.powersave_bias == POWERSAVE_BIAS_MINLEVEL)) {
-		/* nothing to do */
-		return;
-	}
+	if (type == EV_SYN && code == SYN_REPORT) {
+		if ((dbs_tuners_ins.powersave_bias == POWERSAVE_BIAS_MAXLEVEL) ||
+			(dbs_tuners_ins.powersave_bias == POWERSAVE_BIAS_MINLEVEL)) {
+			/* nothing to do */
+			return;
+		}
 
 	for_each_online_cpu(i)
 		queue_work_on(i, dbs_wq, &per_cpu(dbs_refresh_work, i).work);
+		for_each_online_cpu(i) {
+			queue_work_on(i, input_wq, &per_cpu(dbs_refresh_work, i));
+		}
+	}
 }
+
+#ifdef CONFIG_INPUT_MEDIATOR
+
+static struct input_mediator_handler dbs_input_mediator_handler = {
+	.event = dbs_input_event,
+	};
+
+#else
 
 static int dbs_input_connect(struct input_handler *handler,
 		struct input_dev *dev, const struct input_device_id *id)
@@ -1292,6 +1305,7 @@ static struct smp_hotplug_thread dbs_sync_threads = {
 	.thread_fn	= run_dbs_sync,
 	.thread_comm	= "dbs_sync/%u",
 };
+#endif
 
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 				   unsigned int event)
@@ -1362,8 +1376,13 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 			atomic_notifier_chain_register(&migration_notifier_head,
 					&dbs_migration_nb);
 		}
-		if (!cpu)
-			rc = input_register_handler(&dbs_input_handler);
+		if (!cpu){
+#ifdef CONFIG_INPUT_MEDIATOR
+			input_register_mediator_secondary(&dbs_input_mediator_handler);
+#else		
+			input_register_handler(&dbs_input_handler);
+#endif
+		}
 		mutex_unlock(&dbs_mutex);
 
 
@@ -1389,9 +1408,16 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		/* If device is being removed, policy is no longer
 		 * valid. */
 		this_dbs_info->cur_policy = NULL;
-		if (!cpu)
+		if (!cpu){
+#ifdef CONFIG_INPUT_MEDIATOR
+			input_unregister_mediator_secondary(&dbs_input_mediator_handler);
+#else
 			input_unregister_handler(&dbs_input_handler);
 		if (!dbs_enable) {
+#endif
+		}
+		mutex_unlock(&dbs_mutex);
+		if (!dbs_enable)
 			sysfs_remove_group(cpufreq_global_kobject,
 					   &dbs_attr_group);
 			atomic_notifier_chain_unregister(

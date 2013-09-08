@@ -994,6 +994,13 @@ static ssize_t show_above_hispeed_delay(
 	spin_unlock_irqrestore(&above_hispeed_delay_lock, flags);
 	return ret;
 }
+#ifdef CONFIG_INPUT_MEDIATOR
+
+static struct input_mediator_handler interactive_input_mediator_handler = {
+	.event = cpufreq_interactive_input_event,
+	};
+
+#else
 
 static ssize_t store_above_hispeed_delay(
 	struct kobject *kobj, struct attribute *attr, const char *buf,
@@ -1025,10 +1032,53 @@ static ssize_t store_above_hispeed_delay(
 	return count;
 
 }
+	error = input_register_handle(handle);
+	if (error)
+		goto err2;
+
+	error = input_open_device(io->handle);
+	if (error)
+		goto err1;
+
+	return 0;
+err1:
+	input_unregister_handle(handle);
+err2:
+	kfree(handle);
+	return error;
+}
+
+static void cpufreq_interactive_input_disconnect(struct input_handle *handle)
+{
+	input_close_device(handle);
+	input_unregister_handle(handle);
+	kfree(handle);
+}
+
+static const struct input_device_id cpufreq_interactive_ids[] = {
+	{
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
+			 INPUT_DEVICE_ID_MATCH_ABSBIT,
+		.evbit = { BIT_MASK(EV_ABS) },
+		.absbit = { [BIT_WORD(ABS_MT_POSITION_X)] =
+			    BIT_MASK(ABS_MT_POSITION_X) |
+			    BIT_MASK(ABS_MT_POSITION_Y) },
+	}, /* multi-touch touchscreen */
+	{
+		.flags = INPUT_DEVICE_ID_MATCH_KEYBIT |
+			 INPUT_DEVICE_ID_MATCH_ABSBIT,
+		.keybit = { [BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH) },
+		.absbit = { [BIT_WORD(ABS_X)] =
+			    BIT_MASK(ABS_X) | BIT_MASK(ABS_Y) },
+	}, /* touchpad */
+	{ },
+};
 
 static struct global_attr above_hispeed_delay_attr =
 	__ATTR(above_hispeed_delay, S_IRUGO | S_IWUSR,
 		show_above_hispeed_delay, store_above_hispeed_delay);
+
+#endif
 
 static ssize_t show_hispeed_freq(struct kobject *kobj,
 				 struct attribute *attr, char *buf)
@@ -1519,6 +1569,15 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 		idle_notifier_register(&cpufreq_interactive_idle_nb);
 		cpufreq_register_notifier(
 			&cpufreq_notifier_block, CPUFREQ_TRANSITION_NOTIFIER);
+		
+#ifdef CONFIG_INPUT_MEDIATOR
+		input_register_mediator_secondary(&interactive_input_mediator_handler);
+#else
+		rc = input_register_handler(&cpufreq_interactive_input_handler);
+		if (rc)
+			pr_warn("%s: failed to register input handler\n",
+				__func__);
+#endif
 		mutex_unlock(&gov_lock);
 		break;
 
@@ -1542,6 +1601,12 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 		cpufreq_unregister_notifier(
 			&cpufreq_notifier_block, CPUFREQ_TRANSITION_NOTIFIER);
 		idle_notifier_unregister(&cpufreq_interactive_idle_nb);
+		
+#ifdef CONFIG_INPUT_MEDIATOR
+		input_unregister_mediator_secondary(&interactive_input_mediator_handler);
+#else
+		input_unregister_handler(&cpufreq_interactive_input_handler);
+#endif
 		sysfs_remove_group(cpufreq_global_kobject,
 				&interactive_attr_group);
 		mutex_unlock(&gov_lock);
@@ -1658,6 +1723,7 @@ static int __init cpufreq_interactive_init(void)
 	/* NB: wake up so the thread does not look hung to the freezer */
 	wake_up_process(speedchange_task);
 
+	idle_notifier_register(&cpufreq_interactive_idle_nb);
 	return cpufreq_register_governor(&cpufreq_gov_interactive);
 }
 
