@@ -108,10 +108,71 @@ extern int ip_vs_conn_tab_size;
 struct ip_vs_iphdr {
 	int len;
 	__u8 protocol;
+	__u32 len;	/* IPv4 simply where L4 starts
+			   IPv6 where L4 Transport Header starts */
+	__u16 fragoffs; /* IPv6 fragment offset, 0 if first frag (or not frag)*/
+	__s16 protocol;
+	__s32 flags;
 	union nf_inet_addr saddr;
 	union nf_inet_addr daddr;
 };
 
+static inline void *frag_safe_skb_hp(const struct sk_buff *skb, int offset,
+				      int len, void *buffer,
+				      const struct ip_vs_iphdr *ipvsh)
+{
+	return skb_header_pointer(skb, offset, len, buffer);
+}
+
+static inline void
+ip_vs_fill_ip4hdr(const void *nh, struct ip_vs_iphdr *iphdr)
+{
+	const struct iphdr *iph = nh;
+
+	iphdr->len	= iph->ihl * 4;
+	iphdr->fragoffs	= 0;
+	iphdr->protocol	= iph->protocol;
+	iphdr->saddr.ip	= iph->saddr;
+	iphdr->daddr.ip	= iph->daddr;
+}
+
+/* This function handles filling *ip_vs_iphdr, both for IPv4 and IPv6.
+ * IPv6 requires some extra work, as finding proper header position,
+ * depend on the IPv6 extension headers.
+ */
+static inline void
+ip_vs_fill_iph_skb(int af, const struct sk_buff *skb, struct ip_vs_iphdr *iphdr)
+{
+#ifdef CONFIG_IP_VS_IPV6
+	if (af == AF_INET6) {
+		const struct ipv6hdr *iph =
+			(struct ipv6hdr *)skb_network_header(skb);
+		iphdr->saddr.in6 = iph->saddr;
+		iphdr->daddr.in6 = iph->daddr;
+		/* ipv6_find_hdr() updates len, flags */
+		iphdr->len	 = 0;
+		iphdr->flags	 = 0;
+		iphdr->protocol  = ipv6_find_hdr(skb, &iphdr->len, -1,
+						 &iphdr->fragoffs,
+						 &iphdr->flags);
+	} else
+#endif
+	{
+		const struct iphdr *iph =
+			(struct iphdr *)skb_network_header(skb);
+		iphdr->len	= iph->ihl * 4;
+		iphdr->fragoffs	= 0;
+		iphdr->protocol	= iph->protocol;
+		iphdr->saddr.ip	= iph->saddr;
+		iphdr->daddr.ip	= iph->daddr;
+	}
+}
+
+/* This function is a faster version of ip_vs_fill_iph_skb().
+ * Where we only populate {s,d}addr (and avoid calling ipv6_find_hdr()).
+ * This is used by the some of the ip_vs_*_schedule() functions.
+ * (Mostly done to avoid ABI breakage of external schedulers)
+ */
 static inline void
 ip_vs_fill_iphdr(int af, const void *nh, struct ip_vs_iphdr *iphdr)
 {

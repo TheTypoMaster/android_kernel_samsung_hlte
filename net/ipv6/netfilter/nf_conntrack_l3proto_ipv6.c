@@ -246,6 +246,7 @@ static unsigned int ipv6_conntrack_in(unsigned int hooknum,
 				      int (*okfn)(struct sk_buff *))
 {
 	return __ipv6_conntrack_in(dev_net(in), hooknum, skb, okfn);
+	return nf_conntrack_in(dev_net(in), PF_INET6, hooknum, skb);
 }
 
 static unsigned int ipv6_conntrack_local(unsigned int hooknum,
@@ -261,6 +262,7 @@ static unsigned int ipv6_conntrack_local(unsigned int hooknum,
 		return NF_ACCEPT;
 	}
 	return __ipv6_conntrack_in(dev_net(out), hooknum, skb, okfn);
+	return nf_conntrack_in(dev_net(out), PF_INET6, hooknum, skb);
 }
 
 static struct nf_hook_ops ipv6_conntrack_ops[] __read_mostly = {
