@@ -77,6 +77,9 @@ static void cs_check_cpu(int cpu, unsigned int load)
 	if (cs_tuners->freq_step == 0)
 		return;
 
+	now = ktime_to_us(ktime_get());
+	boosted = now < (get_input_time() + cs_tuners->input_boost_duration);
+
 	/* Check for frequency increase */
 	if (load > DEF_FREQUENCY_TWOSTEP_THRESHOLD) {
 		dbs_info->down_skip = 0;
@@ -108,6 +111,10 @@ static void cs_check_cpu(int cpu, unsigned int load)
 		}
 
 		dbs_info->requested_freq += freq_target;
+		if (boosted && policy->cur < cs_tuners->input_boost_freq
+				&& dbs_info->requested_freq < cs_tuners->input_boost_freq)
+			dbs_info->requested_freq = cs_tuners->input_boost_freq;
+
 		if (dbs_info->requested_freq > policy->max)
 			dbs_info->requested_freq = policy->max;
 
@@ -142,6 +149,7 @@ static void cs_check_cpu(int cpu, unsigned int load)
 			if ((now - cs_tuners->twostep_time) >= 150000)
                 		cs_tuners->twostep_counter = 0;
 		if (dbs_info->twostep_counter) {
+			/* 150ms*/
 			if ((now - dbs_info->twostep_time) >= 150000)
                 		dbs_info->twostep_counter = 0;
 		}
@@ -157,6 +165,11 @@ static void cs_check_cpu(int cpu, unsigned int load)
 			dbs_info->requested_freq -= freq_target;
 		else
 			dbs_info->requested_freq = policy->min;
+
+		if (boosted)
+                        dbs_info->requested_freq
+				= max(cs_tuners->input_boost_freq,
+					dbs_info->requested_freq);
 
 		__cpufreq_driver_target(policy, dbs_info->requested_freq,
 				CPUFREQ_RELATION_H);
