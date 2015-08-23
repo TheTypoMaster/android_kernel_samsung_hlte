@@ -164,9 +164,7 @@ static __ref void load_timer(struct work_struct *work)
 	if (up_timer < up_timer_cnt)
 		up_timer++;
 	
-	for_each_online_cpu(cpu)
-		avg_load += cpufreq_quick_get_util(cpu);
-		
+	for_each_online_cpu(cpu)		
 	avg_load /= num_online_cpus();
 	
 #if DEBUG
